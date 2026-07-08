@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "./LogExpMath.sol";
+
 library WeightedMath {
     uint256 internal constant _MAX_IN_RATIO = 3e19;
     uint256 internal constant _MAX_OUT_RATIO = 3e19;
