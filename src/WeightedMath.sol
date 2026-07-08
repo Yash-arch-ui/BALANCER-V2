@@ -18,6 +18,7 @@ library WeightedMath {
     error MulOverflow();
     error ZeroInvariant();
     error ZeroDivisor();
+
     function add(uint256 a, uint256 b) internal pure returns (uint256) {
         uint256 c = a + b;
         if (c < a) revert AddOverflow();
@@ -34,14 +35,21 @@ library WeightedMath {
         if (a != 0 && product / a != b) revert MulOverflow();
         return product / _ONE;
     }
-    function divUp(uint256 a,uint256 b) internal pure returns(uint256){
-       if(b==0) return ZeroDivsior;
-       if(a==0) return 0;
-       uint256 aInf= a*_ONE;
-       if(aInf/a!= _ONE) return MulOverflow();
-       return ((aInf -1)/b) + 1 ;
+
+    function divUp(uint256 a, uint256 b) internal pure returns (uint256) {
+        if (b == 0) return ZeroDivsior;
+        if (a == 0) return 0;
+        uint256 aInf = a * _ONE;
+        if (aInf / a != _ONE) return MulOverflow();
+        return ((aInf - 1) / b) + 1;
     }
-    function divDown(uint256 )
+
+    function divDown(uint256 a, uint256 b) internal pure returns (uint256) {
+        if (b == 0) return ZeroDivsior;
+        if (a == 0) return 0;
+        uint256 aInflated = a * _ONE;
+        return ((aInflated - 1) / b) + 1;
+    }
 
     function powDown(uint256 x, uint256 y) internal pure returns (uint256) {
         if (y == _ONE) {
@@ -75,23 +83,30 @@ library WeightedMath {
         if (invariant == 0) revert ZeroInvariant();
         return invariant;
     }
-    function _calculateOutGivenIn(uint256 balanceIn, uint256 weightIn, uint256 balanceOut, uint256 weightOut,uint256 amountIn) intenral pure returns(uint256){
-            /**********************************************************************************************
-    // outGivenIn                                                                                //
-    // aO = amountOut                                                                             //
-    // bO = balanceOut                                                                            //
-    // bI = balanceIn              /      /            bI             \    (wI / wO) \            //
-    // aI = amountIn    aO = bO * |  1 - | --------------------------  | ^            |           //
-    // wI = weightIn               \      \       ( bI + aI )         /              /            //
-    // wO = weightOut                                                                             //
-    **********************************************************************************************/
-      require(amountIn <= mulDown(balanceIn, _MAX_IN_RATIO), "MAX_IN_RATIO");
-      uint256 denomiator = add(balanceIn+amountIn);
-      uint256 base =divUp(balanceIn,denomiator);
-      uint256 exponent=divDown(weightIn/weightOut);
-      uint256 power = powUp(base,exponent);
-      return mulDown(balanceOut, sub(_ONE,power));
-      // divDown when money is leaving the pool
-      // divUp when the money the trader owes !
+
+    function _calculateOutGivenIn(
+        uint256 balanceIn,
+        uint256 weightIn,
+        uint256 balanceOut,
+        uint256 weightOut,
+        uint256 amountIn
+    ) pure intenral returns (uint256) {
+        /**********************************************************************************************
+        // outGivenIn                                                                                //
+        // aO = amountOut                                                                             //
+        // bO = balanceOut                                                                            //
+        // bI = balanceIn              /      /            bI             \    (wI / wO) \            //
+        // aI = amountIn    aO = bO * |  1 - | --------------------------  | ^            |           //
+        // wI = weightIn               \      \       ( bI + aI )         /              /            //
+        // wO = weightOut                                                                             //
+        **********************************************************************************************/
+        require(amountIn <= mulDown(balanceIn, _MAX_IN_RATIO), "MAX_IN_RATIO"); // max allowed !
+        uint256 denomiator = add(balanceIn + amountIn);
+        uint256 base = divUp(balanceIn, denomiator);
+        uint256 exponent = divDown(weightIn / weightOut);
+        uint256 power = powUp(base, exponent);
+        return mulDown(balanceOut, sub(_ONE, power));
+        // divDown when money is leaving the pool
+        // divUp when the money the trader owes !
     }
 }
