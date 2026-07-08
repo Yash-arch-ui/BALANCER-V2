@@ -1,5 +1,6 @@
 //SPDX-License-Identifier:MIT
-pragma solidity ^0.7.0;
+pragma solidity ^0.8.19;
+
 library LogExpMath {
     int256 constant ONE_18 = 1e18;
     int256 constant ONE_20 = 1e20;
@@ -9,7 +10,7 @@ library LogExpMath {
     int256 constant LN_36_LOWER_BOUND = ONE_18 - 1e17;
     int256 constant LN_36_UPPER_BOUND = ONE_18 + 1e17;
 
-    uint256 constant MILD_EXPONENT_BOUND = 2**254 / uint256(ONE_20);
+    uint256 constant MILD_EXPONENT_BOUND = 2 ** 254 / uint256(ONE_20);
     int256 constant x0 = 128000000000000000000; // 2ˆ7
     int256 constant a0 = 38877084059945950922200000000000000000000000000000000000; // eˆ(x0) (no decimals)
     int256 constant x1 = 64000000000000000000; // 2ˆ6
@@ -34,6 +35,7 @@ library LogExpMath {
     int256 constant a10 = 113314845306682631683; // eˆ(x10)
     int256 constant x11 = 6250000000000000000; // 2ˆ-4
     int256 constant a11 = 106449445891785942956; // eˆ(x11)
+
     function pow(uint256 x, uint256 y) internal pure returns (uint256) {
         if (y == 0) {
             return uint256(ONE_18);
@@ -55,13 +57,11 @@ library LogExpMath {
             logx_times_y = _ln(x_int256) * y_int256;
         }
         logx_times_y /= ONE_18;
-        require(
-            MIN_NATURAL_EXPONENT <= logx_times_y && logx_times_y <= MAX_NATURAL_EXPONENT,
-            "PRODUCT_OUT_OF_BOUNDS"
-        );
+        require(MIN_NATURAL_EXPONENT <= logx_times_y && logx_times_y <= MAX_NATURAL_EXPONENT, "PRODUCT_OUT_OF_BOUNDS");
 
         return uint256(exp(logx_times_y));
     }
+
     function exp(int256 x) internal pure returns (int256) {
         require(x >= MIN_NATURAL_EXPONENT && x <= MAX_NATURAL_EXPONENT, "INVALID_EXPONENT");
 
@@ -77,7 +77,7 @@ library LogExpMath {
             x -= x1;
             firstAN = a1;
         } else {
-            firstAN = 1; 
+            firstAN = 1;
         }
         x *= 100;
         int256 product = ONE_20;
@@ -114,8 +114,8 @@ library LogExpMath {
             x -= x9;
             product = (product * a9) / ONE_20;
         }
-        int256 seriesSum = ONE_20; 
-        int256 term; 
+        int256 seriesSum = ONE_20;
+        int256 term;
         term = x;
         seriesSum += term;
         term = ((term * x) / ONE_20) / 2;
@@ -152,8 +152,8 @@ library LogExpMath {
         seriesSum += term;
         return (((product * seriesSum) / ONE_20) * firstAN) / 100;
     }
-    function log(int256 arg, int256 base) internal pure returns (int256) {
 
+    function log(int256 arg, int256 base) internal pure returns (int256) {
         int256 logBase;
         if (LN_36_LOWER_BOUND < base && base < LN_36_UPPER_BOUND) {
             logBase = _ln_36(base);
@@ -181,14 +181,12 @@ library LogExpMath {
 
     function _ln(int256 a) private pure returns (int256) {
         if (a < ONE_18) {
-           
             return (-_ln((ONE_18 * ONE_18) / a));
         }
 
-
         int256 sum = 0;
         if (a >= a0 * ONE_18) {
-            a /= a0; 
+            a /= a0;
             sum += x0;
         }
 
@@ -268,8 +266,8 @@ library LogExpMath {
         seriesSum *= 2;
         return (sum + seriesSum) / 100;
     }
-    function _ln_36(int256 x) private pure returns (int256) {
 
+    function _ln_36(int256 x) private pure returns (int256) {
         x *= ONE_18;
         int256 z = ((x - ONE_36) * ONE_36) / (x + ONE_36);
         int256 z_squared = (z * z) / ONE_36;
