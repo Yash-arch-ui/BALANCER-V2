@@ -36,18 +36,30 @@ library WeightedMath {
         return product / _ONE;
     }
 
-    function divUp(uint256 a, uint256 b) internal pure returns (uint256) {
-        if (b == 0) return ZeroDivsior;
-        if (a == 0) return 0;
-        uint256 aInf = a * _ONE;
-        if (aInf / a != _ONE) return MulOverflow();
-        return ((aInf - 1) / b) + 1;
+    function mulUp(uint256 a, uint256 b) internal pure returns (uint256) {
+        uint256 product = a * b;
+        if (a != 0 && product / a != b) revert MulOverflow();
+
+        if (product == 0) {
+            return 0;
+        }
+
+        return ((product - 1) / _ONE) + 1;
     }
 
     function divDown(uint256 a, uint256 b) internal pure returns (uint256) {
-        if (b == 0) return ZeroDivsior;
+        if (b == 0) revert ZeroDivisor();
         if (a == 0) return 0;
         uint256 aInflated = a * _ONE;
+        if (aInflated / a != _ONE) revert MulOverflow();
+        return aInflated / b;
+    }
+
+    function divUp(uint256 a, uint256 b) internal pure returns (uint256) {
+        if (b == 0) revert ZeroDivisor();
+        if (a == 0) return 0;
+        uint256 aInflated = a * _ONE;
+        if (aInflated / a != _ONE) revert MulOverflow();
         return ((aInflated - 1) / b) + 1;
     }
 
@@ -61,13 +73,29 @@ library WeightedMath {
             return mulDown(square, square);
         } else {
             uint256 raw = LogExpMath.pow(x, y);
-            uint256 maxError = add(mulDown(raw, _MAX_POW_RELATIVE_ERROR), 1);
+            uint256 maxError = add(mulUp(raw, _MAX_POW_RELATIVE_ERROR), 1);
 
             if (raw < maxError) {
                 return 0;
             } else {
                 return sub(raw, maxError);
             }
+        }
+    }
+
+    function powUp(uint256 x, uint256 y) internal pure returns (uint256) {
+        if (y == _ONE) {
+            return x;
+        } else if (y == _TWO) {
+            return mulUp(x, x);
+        } else if (y == _FOUR) {
+            uint256 square = mulUp(x, x);
+            return mulUp(square, square);
+        } else {
+            uint256 raw = LogExpMath.pow(x, y);
+            uint256 maxError = add(mulUp(raw, _MAX_POW_RELATIVE_ERROR), 1);
+
+            return add(raw, maxError);
         }
     }
 
@@ -90,23 +118,98 @@ library WeightedMath {
         uint256 balanceOut,
         uint256 weightOut,
         uint256 amountIn
-    ) pure intenral returns (uint256) {
-        /**********************************************************************************************
-        // outGivenIn                                                                                //
-        // aO = amountOut                                                                             //
-        // bO = balanceOut                                                                            //
-        // bI = balanceIn              /      /            bI             \    (wI / wO) \            //
-        // aI = amountIn    aO = bO * |  1 - | --------------------------  | ^            |           //
-        // wI = weightIn               \      \       ( bI + aI )         /              /            //
-        // wO = weightOut                                                                             //
-        **********************************************************************************************/
-        require(amountIn <= mulDown(balanceIn, _MAX_IN_RATIO), "MAX_IN_RATIO"); // max allowed !
-        uint256 denomiator = add(balanceIn + amountIn);
-        uint256 base = divUp(balanceIn, denomiator);
-        uint256 exponent = divDown(weightIn / weightOut);
+    ) internal pure returns (uint256) {
+        require(amountIn <= mulDown(balanceIn, _MAX_IN_RATIO), "MAX_IN_RATIO");
+
+        uint256 denominator = add(balanceIn, amountIn);
+        uint256 base = divUp(balanceIn, denominator);
+        uint256 exponent = divDown(weightIn, weightOut);
         uint256 power = powUp(base, exponent);
+
         return mulDown(balanceOut, sub(_ONE, power));
-        // divDown when money is leaving the pool
-        // divUp when the money the trader owes !
     }
+
+    function _calculateInGivenOut(
+        uint256 balanceIn,
+        uint256 weightIn,
+        uint256 balanceOut,
+        uint256 weightOut,
+        uint256 amountOut
+    ) internal pure returns (uint256) {
+         /**********************************************************************************************
+        // inGivenOut                                                                                //
+        // aO = amountOut                                                                            //
+        // bO = balanceOut                                                                           //
+        // bI = balanceIn              /  /            bO             \    (wO / wI)      \          //
+        // aI = amountIn    aI = bI * |  | --------------------------  | ^            - 1  |         //
+        // wI = weightIn               \  \       ( bO - aO )         /                   /          //
+        // wO = weightOut                                                                            //
+        **********************************************************************************************/
+        require(amountOut <= mulDown(balanceOut, _MAX_OUT_RATIO), "MAX_OUT_RATIO");
+
+        uint256 base = divUp(balanceOut, sub(balanceOut, amountOut));
+        uint256 exponent = divUp(weightOut, weightIn);
+        uint256 power = powUp(base, exponent);
+
+        uint256 ratio = sub(power, _ONE);
+
+        return mulUp(balanceIn, ratio);
+    }
+    function _calcBptOutGivenExactTokensIn(
+        uint256[] memory balances,
+        uint256[] memory normalizedWeights,
+        uint256[] memory amountsIn,
+        uint256 bptTotalSupply,
+        uint256 swapFeePercentage
+    ) internal pure returns (uint256) {
+        uint256[] memory  balanceRatioWithFee= new uint256[](amountsIn.length);
+        uint256 invariantRatioWithFees =0;
+        for(uint256 i=0; i < amountsIn.length; i++){
+            balanceRatioWithFee[i] = divDown(add(balances[i], amountsIn[i]), balances[i]);
+            invariantRatioWithFees = add(invariantRatioWithFees,mulDown((balanceRatioWithFee[i]),normalizedWeights[i]));
+
+        }
+      uint256 invariantRatio = _computeJoinExactTokensInInvariantRatio(
+        balances,
+        normalizedWeights,
+        amountsIn,
+        balanceRatioWithFee,
+        invariantRatioWithFees,
+        swapFeePercentage
+    );
+      uint256 bptOut = (invariantRatio > _ONE)?mulDown
+       (bptTotalSupply, sub(invariantRatio, _ONE)):0;
+      return bptOut;
+
+
+
+    }
+    function _computeJoinExactTokensInInvariantRatio(
+    uint256[] memory balances,
+    uint256[] memory normalizedWeights,
+    uint256[] memory amountsIn,
+    uint256[] memory balanceRatiosWithFee,
+    uint256 invariantRatioWithFees,
+    uint256 swapFeePercentage
+) internal pure returns (uint256 invariantRatio) {
+    invariantRatio = _ONE;
+
+    for (uint256 i = 0; i < balances.length; i++) {
+        uint256 amountInWithoutFee;
+
+        if (balanceRatiosWithFee[i] > invariantRatioWithFees) {
+            uint256 nonTaxableAmount = mulDown(balances[i], sub(invariantRatioWithFees, _ONE));
+            uint256 taxableAmount = sub(amountsIn[i], nonTaxableAmount);
+            amountInWithoutFee = add(
+                nonTaxableAmount,
+                mulDown(taxableAmount, sub(_ONE, swapFeePercentage))
+            );
+        } else {
+            amountInWithoutFee = amountsIn[i];
+        }
+
+        uint256 balanceRatio = divDown(add(balances[i], amountInWithoutFee), balances[i]);
+        invariantRatio = mulDown(invariantRatio, powDown(balanceRatio, normalizedWeights[i]));
+    }
+}
 }
