@@ -164,12 +164,13 @@ library WeightedMath {
         uint256 swapFeePercentage
     ) internal pure returns (uint256) {
         uint256[] memory balanceRatioWithFee = new uint256[](amountsIn.length);
-        uint256 invariantRatioWithFees = 0;
+        uint256 invariantRatioWithFees = 0; // weighted sum sort of . // not with fees; just a convention to name the fees..
         for (uint256 i = 0; i < amountsIn.length; i++) {
             balanceRatioWithFee[i] = divDown(add(balances[i], amountsIn[i]), balances[i]);
             invariantRatioWithFees = add(
                 invariantRatioWithFees, mulDown((balanceRatioWithFee[i]), normalizedWeights[i])
             );
+            // Invariant (I) = ∏ balance_i ^ weight_i - naive weighted average 
         }
         uint256 invariantRatio = _computeJoinExactTokensInInvariantRatio(
             balances, normalizedWeights, amountsIn, balanceRatioWithFee, invariantRatioWithFees, swapFeePercentage
@@ -202,5 +203,84 @@ library WeightedMath {
             uint256 balanceRatio = divDown(add(balances[i], amountInWithoutFee), balances[i]);
             invariantRatio = mulDown(invariantRatio, powDown(balanceRatio, normalizedWeights[i]));
         }
+        // deposit many get BPT
     }
+    /*
+Pool: ETH = 100, USDC = 100, both weight 0.5. Fee = 0.3% (swapFeePercentage = 0.003).
+Deposit: 20 ETH, 0 USDC.
+From the earlier step, we already have:
+balanceRatiosWithFee[ETH]  = 1.20
+balanceRatiosWithFee[USDC] = 1.00
+invariantRatioWithFees     = 1.10   (the naive weighted average)
+Token 0 — ETH (balanceRatiosWithFee[ETH] = 1.20 > invariantRatioWithFees = 1.10 → taxable branch):
+nonTaxableAmount = balances[ETH] * (invariantRatioWithFees - 1)
+                 = 100 * (1.10 - 1.0)
+                 = 100 * 0.10
+                 = 10
+Intuition: "if ETH had only grown by the average pool growth rate (10%), that'd be 10 ETH deposited — completely proportional, no fee." So the first 10 ETH of your 20 ETH deposit is fee-free.
+taxableAmount = amountsIn[ETH] - nonTaxableAmount
+              = 20 - 10
+              = 10
+The remaining 10 ETH is the "excess" — the part beyond what proportional scaling would explain. This is the implicit-swap portion.
+amountInWithoutFee = nonTaxableAmount + taxableAmount * (1 - swapFeePercentage)
+                   = 10 + 10 * (1 - 0.003)
+                   = 10 + 10 * 0.997
+                   = 10 + 9.97
+                   = 19.97
+So out of your 20 ETH deposit, only 19.97 counts toward invariant growth — the other 0.03 ETH (0.3% of the taxable 10) was effectively taken as a fee.
+balanceRatio[ETH] = (100 + 19.97) / 100 = 1.1997
+Token 1 — USDC (balanceRatiosWithFee[USDC] = 1.00, not > 1.10 → non-taxable branch):
+amountInWithoutFee = amountsIn[USDC] = 0
+balanceRatio[USDC] = (100 + 0) / 100 = 1.00
+No fee logic runs at all — you deposited nothing here, ratio stays at 1.0 (unchanged).
+Combining into the true invariant ratio:
+invariantRatio = 1.0
+invariantRatio *= balanceRatio[ETH]^weight[ETH]   = 1.0 * 1.1997^0.5  ≈ 1.0 * 1.0953 = 1.0953
+invariantRatio *= balanceRatio[USDC]^weight[USDC] = 1.0953 * 1.00^0.5 = 1.0953 * 1.0   = 1.0953
+So invariantRatio ≈ 1.0953 — noticeably lower than the naive 1.10 we computed before applying the fee. That gap (1.10 - 1.0953 ≈ 0.0047) is the invariant growth that got shaved off because of the fee on the imbalanced portion.
+Feeding this into the final BPT calc:
+bptOut = 1000 * (1.0953 - 1.0) = 1000 * 0.0953 ≈ 95.3 BPT
+    */
+
+   function _calculateTokenInGiveExactBptOut(
+    uint256 balance,
+    uint256 normalizedWeight,
+    uint256 bptAmountOut,
+    uint256 bptTotalSupply,
+    uint256 swapFeePercentage
+   ) internal pure returns(uint256){
+    // deposit one ; get exact bpt 
+    uint256 invariantRatio = divUp(add(bptTotalSupply,bptAmountOut),bptTotalSupply);
+    require(invariantRatio <= _MAX_INVARIANT_RATIO, "MAX_OUT_BPT_FOR_TOKEN_IN");
+    uint256 balanceRatio = powUp(invariantRatio, divUp(_ONE, normalizedWeight));
+    uint256 amountInAfterFee = mulUp(balance,sub(balanceRatio,1));
+   //  this is feeadjusted deposit needed 
+
+   uint256 nonTaxableAmount = mulDown ( balance,sub(invariantRatio, _ONE));
+   uint256 taxableAmount = sub(amountInAfterFee, nonTaxableAmount);
+   uint256 taxableAmountPlusFees = divUp(taxableAmount, sub(_ONE,swapFeePercentage));
+   return add (nonTaxableAmount, taxableAmountPlusFees);
+
+   }
+   function _calculateTokenOutGivenExactBptIn(
+    uint256 balance,
+    uint256 normalizedWeight,
+    uint256 bptAmountIn,
+    uint256 bptTotalSupply,
+    uint256 swapFeePercentage
+   )internal pure returns(uint256){
+    // single token exit(burn bpt,get one token)
+    uint256 invariantRatio = divDown(sub(bptTotalSupply, bptAmountIn), bptTotalSupply);
+    require(invariantRatio >= _MIN_INVARIANT_RATIO, "MIN_BPT_IN_FOR_TOKEN_OUT");
+
+    uint256 balanceRatio = powDown(invariantRatio, divUp(_ONE, normalizedWeight));
+    uint256 amountOutBeforeFee = mulDown(balance, sub(_ONE, balanceRatio));
+    uint256 nonTaxableAmount = mulDown(balance, sub(_ONE, invariantRatio));
+    uint256 taxableAmount = sub(amountOutBeforeFee, nonTaxableAmount);
+
+    uint256 taxableAmountMinusFees = mulDown(taxableAmount, sub(_ONE, swapFeePercentage));
+    // these names might be confusing the first for me ; but understand the workflow 
+    return add(nonTaxableAmount, taxableAmountMinusFees);
+   }
+   
 }
