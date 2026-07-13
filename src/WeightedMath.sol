@@ -163,14 +163,15 @@ library WeightedMath {
         uint256 bptTotalSupply,
         uint256 swapFeePercentage
     ) internal pure returns (uint256) {
-        // Im depositing htese exact 
+        // Im depositing htese exact
         uint256[] memory balanceRatioWithFee = new uint256[](amountsIn.length);
         uint256 invariantRatioWithFees = 0; // weighted sum sort of . // not with fees; just a convention to name the fees..
         for (uint256 i = 0; i < amountsIn.length; i++) {
             balanceRatioWithFee[i] = divDown(add(balances[i], amountsIn[i]), balances[i]);
             // balanceRatioWithFee[i] = (balance[i] + amountIn[i]) / balance[i]
-            invariantRatioWithFees =add(invariantRatioWithFees, mulDown((balanceRatioWithFee[i]), normalizedWeights[i]));
-             //   invariantRatioWithFees += balanceRatioWithFee[i] × normalizedWeights[i]
+            invariantRatioWithFees =
+                add(invariantRatioWithFees, mulDown((balanceRatioWithFee[i]), normalizedWeights[i]));
+            //   invariantRatioWithFees += balanceRatioWithFee[i] × normalizedWeights[i]
             // Invariant (I) = ∏ balance_i ^ weight_i - naive weighted average
         }
         // LOOP 2 - Fee decsion, Flipped Comparision.
@@ -359,42 +360,41 @@ library WeightedMath {
             invariantRatio = mulDown(invariantRatio, powDown(balanceRatio, normalizedWeights[i]));
         }
     }
-function _calcBptOutGivenExactTokenIn(
-    uint256 balance,
-    uint256 normalizedWeight,
-    uint256 amountIn,
-    uint256 bptTotalSupply,
-    uint256 swapFeePercentage
-) internal pure returns (uint256) {
-    // BPT out, so round down overall.
-    uint256 amountInWithoutFee;
-    {
-        uint256 balanceRatioWithFee = divDown(add(balance, amountIn), balance);
-        // NOTE: this assumes all weights sum to 1e18 exactly.
-        uint256 invariantRatioWithFees = add(
-            mulDown(balanceRatioWithFee, normalizedWeight),
-            sub(_ONE, normalizedWeight) // normalizedWeight.complement()
-        );
 
-        if (balanceRatioWithFee > invariantRatioWithFees) {
-            uint256 nonTaxableAmount = invariantRatioWithFees > _ONE
-                ? mulDown(balance, sub(invariantRatioWithFees, _ONE))
-                : 0;
-            uint256 taxableAmount = sub(amountIn, nonTaxableAmount);
-            uint256 swapFee = mulUp(taxableAmount, swapFeePercentage);
-            amountInWithoutFee = add(nonTaxableAmount, sub(taxableAmount, swapFee));
-        } else {
-            amountInWithoutFee = amountIn;
-            if (amountInWithoutFee == 0) {
-                return 0;
+    function _calcBptOutGivenExactTokenIn(
+        uint256 balance,
+        uint256 normalizedWeight,
+        uint256 amountIn,
+        uint256 bptTotalSupply,
+        uint256 swapFeePercentage
+    ) internal pure returns (uint256) {
+        // BPT out, so round down overall.
+        uint256 amountInWithoutFee;
+        {
+            uint256 balanceRatioWithFee = divDown(add(balance, amountIn), balance);
+            // NOTE: this assumes all weights sum to 1e18 exactly.
+            uint256 invariantRatioWithFees = add(
+                mulDown(balanceRatioWithFee, normalizedWeight),
+                sub(_ONE, normalizedWeight) // normalizedWeight.complement()
+            );
+
+            if (balanceRatioWithFee > invariantRatioWithFees) {
+                uint256 nonTaxableAmount =
+                    invariantRatioWithFees > _ONE ? mulDown(balance, sub(invariantRatioWithFees, _ONE)) : 0;
+                uint256 taxableAmount = sub(amountIn, nonTaxableAmount);
+                uint256 swapFee = mulUp(taxableAmount, swapFeePercentage);
+                amountInWithoutFee = add(nonTaxableAmount, sub(taxableAmount, swapFee));
+            } else {
+                amountInWithoutFee = amountIn;
+                if (amountInWithoutFee == 0) {
+                    return 0;
+                }
             }
         }
+
+        uint256 balanceRatio = divDown(add(balance, amountInWithoutFee), balance);
+        uint256 invariantRatio = powDown(balanceRatio, normalizedWeight);
+
+        return (invariantRatio > _ONE) ? mulDown(bptTotalSupply, sub(invariantRatio, _ONE)) : 0;
     }
-
-    uint256 balanceRatio = divDown(add(balance, amountInWithoutFee), balance);
-    uint256 invariantRatio = powDown(balanceRatio, normalizedWeight);
-
-    return (invariantRatio > _ONE) ? mulDown(bptTotalSupply, sub(invariantRatio, _ONE)) : 0;
-}
-    
 }
