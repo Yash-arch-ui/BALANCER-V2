@@ -397,4 +397,38 @@ library WeightedMath {
 
         return (invariantRatio > _ONE) ? mulDown(bptTotalSupply, sub(invariantRatio, _ONE)) : 0;
     }
+
+    function _calcBptInGivenExactTokenOut(
+        uint256 balance,
+        uint256 normalizedWeight,
+        uint256 amountOut,
+        uint256 bptTotalSupply,
+        uint256 swapFeePercentage
+    ) internal pure returns (uint256) {
+        // BPT in, so round up overall.
+        uint256 balanceRatioWithoutFee = divUp(sub(balance, amountOut), balance);
+        uint256 invariantRatioWithoutFees =
+            add(mulUp(balanceRatioWithoutFee, normalizedWeight), sub(_ONE, normalizedWeight));
+        uint256 amountOutWithFee;
+
+        if (invariantRatioWithoutFees > balanceRatioWithoutFee) {
+            // This token is being withdrawn disproportionately more than the pool average — tax it.
+            uint256 nonTaxableAmount = mulDown(balance, sub(_ONE, invariantRatioWithoutFees));
+            uint256 taxableAmount = sub(amountOut, nonTaxableAmount);
+            uint256 taxableAmountPlusFees = divUp(taxableAmount, sub(_ONE, swapFeePercentage));
+            amountOutWithFee = add(nonTaxableAmount, taxableAmountPlusFees);
+        } else {
+            amountOutWithFee = amountOut;
+            // If a token's amount out is not being charged a swap fee then it might be zero.
+            // In this case, the sender should not have to burn any BPT.
+            if (amountOutWithFee == 0) {
+                return 0;
+            }
+        }
+
+        uint256 balanceRatio = divDown(sub(balance, amountOutWithFee), balance);
+        uint256 invariantRatio = powDown(balanceRatio, normalizedWeight);
+
+        return mulUp(bptTotalSupply, sub(_ONE, invariantRatio));
+    }
 }
