@@ -431,4 +431,11 @@ library WeightedMath {
 
         return mulUp(bptTotalSupply, sub(_ONE, invariantRatio));
     }
+    function _calcBptOutAddTokn(
+        uint256 bptTotalSupply,
+        uint256 normalizedWeight) 
+    internal pure returns(uint256){
+        uint256 weightSumRatio= divDown(_ONE,sub(_ONE, normalizedWeight));
+        return mulDown(bptTotalSupply,sub(weightSumRatio, _ONE));
+    }
 }
